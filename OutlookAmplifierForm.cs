@@ -16,7 +16,7 @@ using System.Security.AccessControl ;
 using System.IO.Pipes ;
 using System.Diagnostics;
 
-namespace OutlookAmplifier
+namespace OutlookAmplifier 
 {
 	/// <summary>
 	/// Main and only form for OutlookAmplifier program
@@ -85,7 +85,6 @@ namespace OutlookAmplifier
 			HandleCreated += firstTimeHandleCreated ;
 			player = null ;
 			readRegistrySettings () ;
-			playNewMail () ;
 		}
 		/// <summary>
 		/// Process process in Process.GetProcessesByName ( "OUTLOOK" ) 
@@ -124,6 +123,8 @@ namespace OutlookAmplifier
 			if ( cbShowOnStart.Checked ) 
 				BeginInvoke ( new ThreadStart ( beginRestoreForm ) ) ;
 			else BeginInvoke ( new ThreadStart ( Hide ) ) ;
+
+			playNewMail () ;
 		}
 		/// <summary>
 		/// Reads data from pipe on incoming connection
@@ -174,7 +175,17 @@ namespace OutlookAmplifier
 		protected void endRestoreForm ()
 		{
 			WindowState = FormWindowState.Normal ;
-			BeginInvoke ( new ThreadStart ( BringToFront ) ) ;
+			BringToFront () ;
+			new Thread ( ()=>
+			{
+				if ( IsDisposed ) return ;
+				BeginInvoke ( () =>
+				{
+					if ( IsDisposed ) return ;
+					API.SetForegroundWindow ( Handle ) ;
+					Select () ;
+				} ) ;
+			} ).Start () ;
 		}
 		/// <summary>
 		/// This method checks if this window is minimized before it calls base method(in order to raise Resize event).
@@ -243,6 +254,13 @@ namespace OutlookAmplifier
 		/// This method plays sound for the new mail
 		/// </summary>
 		public void playNewMail ()
+		{
+			BeginInvoke ( new ThreadStart ( playNewMailProc ) ) ;
+		}
+		/// <summary>
+		/// This method plays sound for the new mail
+		/// </summary>
+		public void playNewMailProc ()
 		{
 			if ( string.IsNullOrEmpty ( lbSoundPath.Text ) ) return ;
 			string fullFileName =
@@ -327,16 +345,7 @@ namespace OutlookAmplifier
 							}
 							catch {}
 						break ;
-						case "NewPlaySound" :
-							i = 1 ;
-							try
-							{
-								i = ( int ) userKey.GetValue ( name , 1 , RegistryValueOptions.DoNotExpandEnvironmentNames ) ;
-							}
-							catch { }
-							cbPlaySound.Checked = i != 0 ;
-						break ;
-						case "PlaySound" :
+						case "PlaySoundOnNewMail" :
 							i = 1 ;
 							try
 							{
@@ -461,7 +470,7 @@ namespace OutlookAmplifier
 			RegistryKey userKey = System.Windows.Forms.Application.UserAppDataRegistry ;
 			try
 			{
-				userKey.SetValue ( "NewMailPlaySound" , cbPlaySound.Checked ? 1 : 0 , RegistryValueKind.DWord ) ;
+				userKey.SetValue ( "PlaySoundOnNewMail" , cbPlaySound.Checked ? 1 : 0 , RegistryValueKind.DWord ) ;
 			}
 			catch { }
 			try

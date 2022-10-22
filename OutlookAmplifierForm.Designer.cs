@@ -29,6 +29,7 @@
 		private void InitializeComponent()
 		{
 			this.components = new System.ComponentModel.Container();
+			System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(OutlookAmplifierForm));
 			this.gbOptions = new System.Windows.Forms.GroupBox();
 			this.soundFilePanel = new System.Windows.Forms.FlowLayoutPanel();
 			this.paSoundPath = new System.Windows.Forms.Panel();
@@ -359,6 +360,7 @@
 			// 
 			// notifyIcon
 			// 
+			this.notifyIcon.Icon = ((System.Drawing.Icon)(resources.GetObject("notifyIcon.Icon")));
 			this.notifyIcon.Text = "Outlook amplifer";
 			this.notifyIcon.Visible = true;
 			this.notifyIcon.Click += new System.EventHandler(this.notifyIcon_Click);
@@ -378,6 +380,7 @@
 			this.ClientSize = new System.Drawing.Size(621, 256);
 			this.Controls.Add(this.mainLayout);
 			this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
+			this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
 			this.KeyPreview = true;
 			this.MaximizeBox = false;
 			this.Name = "OutlookAmplifierForm";
