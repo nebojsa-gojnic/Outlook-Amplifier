@@ -41,9 +41,30 @@ namespace OutlookAmplifier
 		/// </summary>
 		protected Explorer activeExplorer ;
 		/// <summary>
+		/// Auxiliary variable for the player property
+		/// </summary>
+		protected WindowsMediaPlayer _player ;
+		/// <summary>
+		/// Get method for the player property
+		/// </summary>
+		/// <returns>Returns WindowsMediaPlayer instance</returns>
+		protected WindowsMediaPlayer getPlayer ()
+		{
+			if ( _player == null ) 
+			{
+				_player = new WindowsMediaPlayer() ;
+				_player.PlayStateChange += player_PlayStateChange;
+			}
+			return _player ;
+		}
+		/// <summary>
 		/// Windows Media Player(COM) application
 		/// </summary>
-		protected WindowsMediaPlayer player ;
+		public WindowsMediaPlayer player 
+		{
+			get => getPlayer () ;
+		}
+
 		/// <summary>
 		/// Receiver pipe for activation from an instance other than the current one
 		/// </summary>
@@ -69,11 +90,16 @@ namespace OutlookAmplifier
 		/// </summary>
 		protected string lowCaseExecutablePath ;
 		/// <summary>
+		/// File and path to temp file with mp3 file to play at program start
+		/// </summary>
+		protected string startSoundPath ;
+		/// <summary>
 		/// Creates new instacne of OutlookAmplifierForm class
 		/// </summary>
 		public OutlookAmplifierForm()
 		{
 			InitializeComponent() ;
+			startSoundPath = null ;
 			volumeBar.Value = 50 ;
 			lowCaseExecutablePath = System.Windows.Forms.Application.ExecutablePath.ToLower() ;
 			lowCaseExecutableFolder = lowCaseExecutablePath ;
@@ -83,7 +109,7 @@ namespace OutlookAmplifier
 			executableFolderLength = lowCaseExecutableFolder.Length ;
 
 			HandleCreated += firstTimeHandleCreated ;
-			player = null ;
+			_player = null ;
 			readRegistrySettings () ;
 		}
 		/// <summary>
@@ -124,7 +150,7 @@ namespace OutlookAmplifier
 				BeginInvoke ( new ThreadStart ( beginRestoreForm ) ) ;
 			else BeginInvoke ( new ThreadStart ( Hide ) ) ;
 
-			playNewMail () ;
+			playStartProgram () ;
 		}
 		/// <summary>
 		/// Reads data from pipe on incoming connection
@@ -255,32 +281,58 @@ namespace OutlookAmplifier
 		/// </summary>
 		public void playNewMail ()
 		{
-			BeginInvoke ( new ThreadStart ( playNewMailProc ) ) ;
-		}
-		/// <summary>
-		/// This method plays sound for the new mail
-		/// </summary>
-		public void playNewMailProc ()
-		{
 			if ( string.IsNullOrEmpty ( lbSoundPath.Text ) ) return ;
 			string fullFileName =
 			 ( ( lbSoundPath.Text [ 0 ] != '\\' ) && ( lbSoundPath.Text.IndexOf ( ':' ) == -1 ) ?
 				( lowCaseExecutableFolder + "\\" ) : "" ) + lbSoundPath.Text ;
 			if ( File.Exists ( fullFileName ) )
 			{
-				if ( player == null ) 
-				{
-					player = new WindowsMediaPlayer() ;
-					player.PlayStateChange += player_PlayStateChange;
-				}
-				else player.controls.stop () ;
+				player.controls.stop () ;
 				player.URL = fullFileName ;
 				player.settings.volume = volumeBar.Value ;
 				if ( IsHandleCreated )
 					BeginInvoke ( player.controls.play ) ;
 				else player.controls.play () ;
 			}
-
+		}
+		/// <summary>
+		/// This method plays sound for the new mail
+		/// </summary>
+		public void playStartProgram()
+		{
+			FileStream fileStream = null ;
+			try
+			{
+				if ( startSoundPath != null )
+					if ( !File.Exists ( startSoundPath ) )
+						startSoundPath = null ;
+				if ( startSoundPath == null )
+				{
+					startSoundPath = Path.GetTempFileName () ;
+					File.Delete ( startSoundPath ) ;
+					int i = startSoundPath.LastIndexOf ( '.' ) ;
+					startSoundPath = i == -1 ? startSoundPath : startSoundPath.Substring ( 0 , i ) + ".mp3" ;
+					fileStream = File.Create ( startSoundPath ) ;
+					byte [] data = Properties.Resources.StartProgram ;
+					fileStream.Write ( data , 0 , data.Length ) ;
+				}
+			}
+			catch { }
+			try
+			{
+				if ( fileStream != null )
+				{
+					fileStream.Close () ;
+					fileStream.Dispose () ;
+				}
+			}
+			catch { }
+			player.controls.stop () ;
+			player.URL = startSoundPath ;
+			player.settings.volume = 30 ;
+			if ( IsHandleCreated )
+				BeginInvoke ( player.controls.play ) ;
+			else player.controls.play () ;
 		}
 		/// <summary>
 		/// When user click on "Play/Stop" button this method calls playNewMail() or player.controls.stop() method 
@@ -422,9 +474,12 @@ namespace OutlookAmplifier
 		private void outlookApplication_NewMail ()
 		{
 			readRegistrySettings () ;
-			if ( cbPlaySound.Checked ) playNewMail () ;
-			if ( cbShowOutlook.Checked )
+			BeginInvoke ( () =>
+			{
+				if ( cbPlaySound.Checked ) playNewMail () ;
+				if ( cbShowOutlook.Checked )
 					connectToOutlookExplorer () ;
+			} ) ;
 		}
 		/// <summary>
 		/// This method brings Outlook main window up and set it into maximized state.<br/>
@@ -433,15 +488,46 @@ namespace OutlookAmplifier
 		protected void bringToFrontActiveExplorer ( )
 		{
 			IntPtr handle = GetOutlookProcess().MainWindowHandle ;
-			if ( API.BringWindowToTop ( handle ) )
+			if ( API.IsWindowVisible ( handle ) )
 			{
 				API.WindowPlacement windowPlacement = new API.WindowPlacement () ;
 				API.GetWindowPlacement ( handle , ref windowPlacement ) ;
 				Screen currentScreen = Screen.FromHandle ( handle ) ;
-				windowPlacement.Command = API.ShowCommand.ShowMinimized ;
-				API.SetWindowPlacement ( handle , ref windowPlacement ) ;
+				API.APIRect rect = new API.APIRect () ;
+				Rectangle bounds = currentScreen.Bounds ;
+				//rect.Left = bounds.Left ;
+				//rect.Top = bounds.Top ;
+				//rect.Right = bounds.Right ;
+				//rect.Left = bounds.Left  ;
+				API.GetWindowRect ( handle , ref rect ) ; 
+				if ( windowPlacement.Command == API.ShowCommand.ShowMaximized )
+				{
+					if ( equalRects ( rect , bounds ) ) return ;
+					windowPlacement.Command = API.ShowCommand.ShowNormal ;
+					windowPlacement.NormalPosition.Left = bounds.Left ;
+					windowPlacement.NormalPosition.Top = bounds.Top ;
+					windowPlacement.NormalPosition.Right = bounds.Right ;
+					windowPlacement.NormalPosition.Bottom = bounds.Bottom  ;
+					API.SetWindowPlacement ( handle , ref windowPlacement ) ;
+				}
+				API.BringWindowToTop ( handle ) ;
 			}
+			else return ;
 			BeginInvoke ( new ThreadStart ( setActiveExplorerMaximized ) ) ;
+		}
+		/// <summary>
+		/// Checks if given parameters point to same area
+		/// </summary>
+		/// <param name="rect">(API.APIRect)</param>
+		/// <param name="bounds">(Rectangle)</param>
+		/// <returns>Returns true if both parameters are with same bounds</returns>
+		public static bool equalRects ( API.APIRect rect , Rectangle bounds )
+		{
+			if ( rect.Left == bounds.Left ) return false ;
+			if ( rect.Top == bounds.Top ) return false ;
+			if ( rect.Right == bounds.Right ) return false ;
+			if ( rect.Left == bounds.Left ) return false ;
+			return true ;
 		}
 		/// <summary>
 		/// Just set activeExplorer.WindowState to OlWindowState.olMaximized .
@@ -454,7 +540,7 @@ namespace OutlookAmplifier
 			{
 				if ( activeExplorer != null )
 					if ( activeExplorer.WindowState != OlWindowState.olMaximized ) 
-					activeExplorer.WindowState = OlWindowState.olMaximized ;
+						activeExplorer.WindowState = OlWindowState.olMaximized ;
 			}
 			catch { }
 
@@ -748,6 +834,23 @@ namespace OutlookAmplifier
 			catch { }
 		}
 		/// <summary>
+		///  Clean up any resources being used.
+		/// </summary>
+		/// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing && (components != null))
+			{
+				components.Dispose();
+			}
+			try
+			{
+				if ( startSoundPath != null ) File.Delete ( startSoundPath ) ;
+			}
+			catch { }
+			base.Dispose(disposing);
+		}
+		/// <summary>
 		/// When user clicks on cmdShowOutlook button this event handler calls connectToOutlookExplorer() methid
 		/// </summary>
 		/// <param name="sender">cmdShowOutlook(Button)</param>
@@ -756,7 +859,6 @@ namespace OutlookAmplifier
 		{
 			connectToOutlookExplorer () ;
 		}
-
 
 	}		
 }
